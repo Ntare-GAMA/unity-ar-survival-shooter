@@ -10,9 +10,8 @@ the timer runs out.
 
 | Deliverable | Link |
 |---|---|
-| APK (Android) | _add link_ |
-| Demo video | _add link_ |
-| Technical documentation | _add link_ |
+| APK (Android) | [ link_](url) |
+
 
 ---
 
