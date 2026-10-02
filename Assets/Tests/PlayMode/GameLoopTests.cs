@@ -20,16 +20,16 @@ namespace ARSurvival.Tests
     /// </summary>
     public class GameLoopTests
     {
-        const string ScenePath = "Assets/Scenes/SampleScene.unity";
-
         [UnitySetUp]
         public IEnumerator LoadScene()
         {
             // No AR device in the editor: AR components may log errors that are irrelevant here.
             LogAssert.ignoreFailingMessages = true;
 #if UNITY_EDITOR
+            // The game scene is the first enabled scene in Build Settings.
+            var scenePath = System.Array.Find(UnityEditor.EditorBuildSettings.scenes, s => s.enabled).path;
             yield return UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
-                ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
+                scenePath, new LoadSceneParameters(LoadSceneMode.Single));
 #endif
             yield return null;
         }
@@ -61,16 +61,21 @@ namespace ARSurvival.Tests
             var pools = UnityEngine.Object.FindObjectsByType<ProjectilePool>();
             int pooledObjectsBefore = CountChildren(pools);
 
-            // Enemies spawn on the arena
+            // Enemies spawn on the arena, starting with a small number
             yield return WaitUntil(() => Enemy.Active.Count > 0, 5f, "no enemy spawned");
+            var spawner = UnityEngine.Object.FindAnyObjectByType<EnemySpawner>();
+            Assert.LessOrEqual(Enemy.Active.Count, spawner.CurrentCap, "spawner must respect the current cap");
             var enemy = Enemy.Active[0];
             Assert.AreEqual(placement.PlacedWorld.position.y, enemy.transform.position.y, 0.001f,
                 "enemy should spawn on the placed plane");
 
+            // Manual aim only: with the aim stick untouched, the player never fires on their own.
+            var bulletPool = ProjectilePool.For(Team.Player);
+            Assert.AreEqual(0, bulletPool.ActiveCount, "player must not fire without aiming");
+
             // Player bullets (from the pool) kill it and award score
             int scoreBefore = game.Session.Score;
             int shotsFired = 0;
-            var bulletPool = ProjectilePool.For(Team.Player);
             while (enemy.IsAlive && shotsFired < 20)
             {
                 var origin = enemy.AimPoint + Vector3.back * 0.3f;
@@ -130,6 +135,24 @@ namespace ARSurvival.Tests
             Assert.AreNotEqual(meleeSo.FindProperty("baseHealth").intValue, shooterSo.FindProperty("baseHealth").intValue);
             Assert.Greater(shooterSo.FindProperty("attackRange").floatValue, meleeSo.FindProperty("attackRange").floatValue);
 #endif
+        }
+
+        [Test]
+        public void EnemyCap_RampsUpFromFewAndNeverExceedsMax()
+        {
+            foreach (var difficulty in GameManager.Instance.Difficulties)
+            {
+                Assert.LessOrEqual(difficulty.MaxAliveAt(0f), 2, $"{difficulty.DisplayName} should start with few enemies");
+                Assert.AreEqual(difficulty.MaxAliveEnemies, difficulty.MaxAliveAt(1f), $"{difficulty.DisplayName} reaches its cap");
+                int previous = 0;
+                for (float p = 0f; p <= 1f; p += 0.05f)
+                {
+                    int cap = difficulty.MaxAliveAt(p);
+                    Assert.GreaterOrEqual(cap, previous, "cap never shrinks during a round");
+                    Assert.LessOrEqual(cap, difficulty.MaxAliveEnemies);
+                    previous = cap;
+                }
+            }
         }
 
         static int CountChildren(ProjectilePool[] pools) => pools.Sum(p => p.transform.childCount);
